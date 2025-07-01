@@ -1,0 +1,16 @@
+[
+    {
+      "pointcloud_render_path": "/home/tione/notebook/TrajectoryCrafter/data/mytest/render.mp4",  
+      "reference_video_path": "/home/tione/notebook/TrajectoryCrafter/data/mytest/input.mp4",   
+      "target_video_path": "/home/tione/notebook/TrajectoryCrafter/data/mytest/gen.mp4",         
+      "mask_video_path": "/home/tione/notebook/TrajectoryCrafter/data/mytest/mask.mp4",         
+      "prompt": "There is a crab whose shell has been replaced with a yellow light bulb, and the filament inside the bulb is glowing, emitting a soft white light. The background is a beach or a coastal area, with the ground covered in sand and a blurred shoreline visible in the distance."
+    },
+    {
+        "pointcloud_render_path": "/home/tione/notebook/TrajectoryCrafter/data/mytest/render.mp4",  
+        "reference_video_path": "/home/tione/notebook/TrajectoryCrafter/data/mytest/input.mp4",   
+        "target_video_path": "/home/tione/notebook/TrajectoryCrafter/data/mytest/gen.mp4",
+        "mask_video_path": "/home/tione/notebook/TrajectoryCrafter/data/mytest/mask.mp4",         
+        "prompt": "There is a crab whose shell has been replaced with a yellow light bulb, and the filament inside the bulb is glowing, emitting a soft white light. The background is a beach or a coastal area, with the ground covered in sand and a blurred shoreline visible in the distance."
+      }
+]

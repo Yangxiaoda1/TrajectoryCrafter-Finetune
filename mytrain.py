@@ -1,4 +1,4 @@
-# train_trajcrafter_deepspeed.py
+#accelerate launch --config_file /mnt/bn/xdatahl/yangxiaoda/default_config.yaml /mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/TrajectoryCrafter/mytrain_deepspeed.py
 import os
 import json
 from tqdm import tqdm

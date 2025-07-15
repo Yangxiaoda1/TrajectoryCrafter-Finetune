@@ -1,3 +1,4 @@
+#accelerate launch --config_file /mnt/bn/xdatahl/yangxiaoda/default_config.yaml /mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/TrajectoryCrafter/mytrain_deepspeed.py
 import os, gc
 import numpy as np
 import torch
@@ -23,8 +24,8 @@ from scipy.spatial.transform import Rotation as R, Slerp
 # ===== 配置参数 =====
 class SimpleOpts:
     device = "cuda"
-    unet_path = "tencent/DepthCrafter"
-    pre_train_path = "stabilityai/stable-video-diffusion-img2vid-xt"
+    unet_path = "/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/TrajectoryCrafter/checkpoints/DepthCrafter"
+    pre_train_path = "/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/TrajectoryCrafter/checkpoints/stable-video-diffusion-img2vid"
     cpu_offload = "model"
     near, far = 0.0001, 10000.0
     depth_inference_steps = 5
@@ -36,15 +37,15 @@ class SimpleOpts:
     sampler_name = "DDIM_Origin"
     cut = 20
     seed = 42
-    model_name = "alibaba-pai/CogVideoX-Fun-V1.1-5b-InP"
-    transformer_path = "TrajectoryCrafter/TrajectoryCrafter"
-    blip_path = "Salesforce/blip2-opt-2.7b"
-    save_dir = "/home/tione/notebook/TrajectoryCrafter/data/mytest"
+    model_name = "/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/TrajectoryCrafter/checkpoints/CogVideoX-Fun-V1.1-5b-InP"
+    transformer_path = "/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/TrajectoryCrafter/checkpoints/TrajectoryCrafter"
+    blip_path = "/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/TrajectoryCrafter/checkpoints/blip2-opt-2.7b"
+    save_dir = "/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/robot"
     refine_prompt = ""
     negative_prompt = ""
     diffusion_guidance_scale = 7.5
     diffusion_inference_steps = 50
-    weight_dtype = torch.float16
+    weight_dtype = torch.float32
 
 opts = SimpleOpts()
 
@@ -100,10 +101,10 @@ def interpolate_camera_poses(pose_s, pose_t, num_steps):
     return interpolated_poses
 
 # ===== 1. 加载视频与相机参数 =====
-video_path = "/home/tione/notebook/TrajectoryCrafter/data/mytest/video.mp4"
-intrinsics_path = "/home/tione/notebook/TrajectoryCrafter/data/mytest/intrinsics.npy"
-src_extrinsics_path = "/home/tione/notebook/TrajectoryCrafter/data/mytest/extrinsics1.npy"
-tgt_extrinsics_path = "/home/tione/notebook/TrajectoryCrafter/data/mytest/extrinsics2.npy"
+video_path = "/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/robot/video.mp4"
+intrinsics_path = "/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/robot/intrinsics.npy"
+src_extrinsics_path = "/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/robot/extrinsics1.npy"
+tgt_extrinsics_path = "/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/robot/extrinsics2.npy"
 
 frames = read_video_frames(video_path, opts.video_length, opts.stride, opts.max_res)
 
@@ -159,9 +160,12 @@ cond_video = F.interpolate(cond_video, size=opts.sample_size, mode='bilinear', a
 cond_masks = F.interpolate(cond_masks, size=opts.sample_size, mode='nearest')
 
 os.makedirs(opts.save_dir, exist_ok=True)
-save_video((frames[: opts.video_length - opts.cut].permute(0, 2, 3, 1) + 1.0) / 2.0, os.path.join(opts.save_dir, 'input.mp4'), fps=opts.fps)
-save_video(cond_video.permute(0, 2, 3, 1).cpu().numpy(), os.path.join(opts.save_dir, 'render.mp4'), fps=opts.fps)
-save_video(cond_masks[opts.cut:].repeat(1, 3, 1, 1).permute(0, 2, 3, 1), os.path.join(opts.save_dir, 'mask.mp4'), fps=opts.fps)
+save_video((frames[: opts.video_length - opts.cut].permute(0, 2, 3, 1) + 1.0) / 2.0, os.path.join(opts.save_dir, 'vis_input.mp4'), fps=opts.fps)
+save_video(cond_video[opts.cut:].permute(0, 2, 3, 1).cpu().numpy(), os.path.join(opts.save_dir, 'vis_render.mp4'), fps=opts.fps)
+save_video(cond_masks[opts.cut:].repeat(1, 3, 1, 1).permute(0, 2, 3, 1), os.path.join(opts.save_dir, 'vis_mask.mp4'), fps=opts.fps)
+save_video((frames.permute(0, 2, 3, 1) + 1.0) / 2.0, os.path.join(opts.save_dir, 'train_input.mp4'), fps=opts.fps)
+save_video(cond_video.permute(0, 2, 3, 1).cpu().numpy(), os.path.join(opts.save_dir, 'train_render.mp4'), fps=opts.fps)
+save_video(cond_masks.repeat(1, 3, 1, 1).permute(0, 2, 3, 1), os.path.join(opts.save_dir, 'train_mask.mp4'), fps=opts.fps)
 
 # ===== 6. 生成条件准备（调整 shape） =====
 frames = (frames.permute(1, 0, 2, 3).unsqueeze(0) + 1.0) / 2.0
@@ -217,7 +221,8 @@ with torch.no_grad():
         reference=frames_ref,
     ).videos
 
-save_video(sample[0].permute(1, 2, 3, 0)[opts.cut:], os.path.join(opts.save_dir, 'gen.mp4'), fps=opts.fps)
+save_video(sample[0].permute(1, 2, 3, 0)[opts.cut:], os.path.join(opts.save_dir, 'vis_gen.mp4'), fps=opts.fps)
+save_video(sample[0].permute(1, 2, 3, 0), os.path.join(opts.save_dir, 'train_gen.mp4'), fps=opts.fps)
 
 # ===== 9. 拼接生成结果和原始输入可视化 =====
 viz = True
@@ -227,4 +232,4 @@ if viz:
     interval = torch.ones(3, opts.video_length - opts.cut, 384, 30).to(opts.device)
     result = torch.cat((left, interval, right), dim=3)
     final_result = torch.cat((result, torch.flip(result, dims=[1])[:, 1:]), dim=1)
-    save_video(final_result.permute(1, 2, 3, 0).cpu(), os.path.join(opts.save_dir, 'viz.mp4'), fps=opts.fps * 2)
+    save_video(final_result.permute(1, 2, 3, 0).cpu(), os.path.join(opts.save_dir, 'vis_viz.mp4'), fps=opts.fps * 2)

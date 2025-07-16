@@ -4,6 +4,7 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 from PIL import Image
+import argparse
 
 from transformers import AutoProcessor, Blip2ForConditionalGeneration, T5EncoderModel
 from diffusers import (
@@ -26,7 +27,7 @@ class SimpleOpts:
     unet_path = "/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/TrajectoryCrafter/checkpoints/DepthCrafter"
     pre_train_path = "/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/TrajectoryCrafter/checkpoints/stable-video-diffusion-img2vid"
     cpu_offload = "model"
-    near, far = 0.0001, 10000.0
+    near, far = 0.0001, 10.0
     depth_inference_steps = 5
     depth_guidance_scale = 1.0
     window_size, overlap, max_res = 110, 25, 1024
@@ -45,8 +46,27 @@ class SimpleOpts:
     diffusion_guidance_scale = 7.5
     diffusion_inference_steps = 50
     weight_dtype = torch.float32
+    # 新增参数
+    video_path = None
+    intrinsics_path = None
+    src_extrinsics_path = None
+    tgt_extrinsics_path = None
+
+# 解析命令行参数
+parser = argparse.ArgumentParser(description="TrajectoryCrafter inference script")
+parser.add_argument('--video_path', type=str, required=False, default="/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/robot/video.mp4", help='视频文件路径')
+parser.add_argument('--intrinsics_path', type=str, required=False, default="/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/robot/intrinsics.npy", help='相机内参npy路径')
+parser.add_argument('--src_extrinsics_path', type=str, required=False, default="/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/robot/extrinsics1.npy", help='源相机外参npy路径')
+parser.add_argument('--tgt_extrinsics_path', type=str, required=False, default="/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/robot/extrinsics2.npy", help='目标相机外参npy路径')
+parser.add_argument('--save_dir', type=str, required=False, default="/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/robot", help='结果保存目录')
+args = parser.parse_args()
 
 opts = SimpleOpts()
+opts.video_path = args.video_path
+opts.intrinsics_path = args.intrinsics_path
+opts.src_extrinsics_path = args.src_extrinsics_path
+opts.tgt_extrinsics_path = args.tgt_extrinsics_path
+opts.save_dir = args.save_dir
 
 # ===== 工具函数 =====
 def get_caption(opts, image):
@@ -100,10 +120,10 @@ def interpolate_camera_poses(pose_s, pose_t, num_steps):
     return interpolated_poses
 
 # ===== 1. 加载视频与相机参数 =====
-video_path = "/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/robot/video.mp4"
-intrinsics_path = "/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/robot/intrinsics.npy"
-src_extrinsics_path = "/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/robot/extrinsics1.npy"
-tgt_extrinsics_path = "/mnt/bn/xdatahl/yangxiaoda/TrajectoryCrafter-Finetune/robot/extrinsics2.npy"
+video_path = opts.video_path
+intrinsics_path = opts.intrinsics_path
+src_extrinsics_path = opts.src_extrinsics_path
+tgt_extrinsics_path = opts.tgt_extrinsics_path
 
 frames = read_video_frames(video_path, opts.video_length, opts.stride, opts.max_res)
 
@@ -159,12 +179,11 @@ cond_video = F.interpolate(cond_video, size=opts.sample_size, mode='bilinear', a
 cond_masks = F.interpolate(cond_masks, size=opts.sample_size, mode='nearest')
 
 os.makedirs(opts.save_dir, exist_ok=True)
+
+# ===== 可视化，不能删除 =====
 save_video((frames[: opts.video_length - opts.cut].permute(0, 2, 3, 1) + 1.0) / 2.0, os.path.join(opts.save_dir, 'vis_input.mp4'), fps=opts.fps)
 save_video(cond_video[opts.cut:].permute(0, 2, 3, 1).cpu().numpy(), os.path.join(opts.save_dir, 'vis_render.mp4'), fps=opts.fps)
 save_video(cond_masks[opts.cut:].repeat(1, 3, 1, 1).permute(0, 2, 3, 1), os.path.join(opts.save_dir, 'vis_mask.mp4'), fps=opts.fps)
-save_video((frames.permute(0, 2, 3, 1) + 1.0) / 2.0, os.path.join(opts.save_dir, 'train_input.mp4'), fps=opts.fps)
-save_video(cond_video.permute(0, 2, 3, 1).cpu().numpy(), os.path.join(opts.save_dir, 'train_render.mp4'), fps=opts.fps)
-save_video(cond_masks.repeat(1, 3, 1, 1).permute(0, 2, 3, 1), os.path.join(opts.save_dir, 'train_mask.mp4'), fps=opts.fps)
 
 # ===== 6. 生成条件准备（调整 shape） =====
 frames = (frames.permute(1, 0, 2, 3).unsqueeze(0) + 1.0) / 2.0
@@ -220,8 +239,10 @@ with torch.no_grad():
         reference=frames_ref,
     ).videos
 
+
+print("prompt:", prompt)
+# ===== 可视化，不能删除 =====
 save_video(sample[0].permute(1, 2, 3, 0)[opts.cut:], os.path.join(opts.save_dir, 'vis_gen.mp4'), fps=opts.fps)
-save_video(sample[0].permute(1, 2, 3, 0), os.path.join(opts.save_dir, 'train_gen.mp4'), fps=opts.fps)
 
 # ===== 9. 拼接生成结果和原始输入可视化 =====
 viz = True
